@@ -39,7 +39,6 @@
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/f2fs.h>
-struct file *fp_hot;
 static struct kmem_cache *f2fs_inode_cachep;
 #ifdef CONFIG_F2FS_FAULT_INJECTION
 
@@ -4528,6 +4527,7 @@ static void kill_f2fs_super(struct super_block *sb)
 
 		set_sbi_flag(sbi, SBI_IS_CLOSE);
 		f2fs_stop_gc_thread(sbi);
+		save_hotness_entry(sbi);
 		f2fs_stop_hc_thread(sbi);
 		release_hotness_entry(sbi);
 		kfree(sbi->hi);
@@ -4704,7 +4704,6 @@ static void __exit exit_f2fs_fs(void)
 	f2fs_destroy_segment_manager_caches();
 	f2fs_destroy_node_manager_caches();
 	destroy_inodecache();
-	filp_close(fp_hot, NULL);
 }
 
 module_init(init_f2fs_fs)

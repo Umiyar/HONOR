@@ -1611,6 +1611,8 @@ struct hotness_info {
 	// unsigned int ipu_blk_cnt;
 	// unsigned int opu_blk_cnt;
 	// 记录3种温度类别的一些信息
+	int flag;
+	unsigned int hc_count;
 	unsigned int counts[TEMP_TYPE_NUM];
 	unsigned int Native_info_min[TEMP_TYPE_NUM];
 	unsigned int Native_info_max[TEMP_TYPE_NUM];

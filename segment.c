@@ -3345,7 +3345,6 @@ static void do_write_page(struct f2fs_summary *sum, struct f2fs_io_info *fio)
 	int type;
 	__u32 new_blkaddr;
 	__u32 Native_info;
-	// struct f2fs_io_info *oldfio;
 	bool keep_order;
 	unsigned int segno_old,segno_new;
 	struct curseg_info *curseg;
@@ -3371,7 +3370,6 @@ reallocate:
 	f2fs_allocate_data_block(fio->sbi, fio->page, fio->old_blkaddr,
 			&fio->new_blkaddr, sum, type, fio);
 	if (GET_SEGNO(fio->sbi, fio->old_blkaddr) != NULL_SEGNO) {
-		// printk("2:old_blkaddr:%u new_blkaddr:%u info:%u temp:%d",fio->old_blkaddr,fio->new_blkaddr,fio->new_blkaddr-fio->old_blkaddr,fio->temp);
 		invalidate_mapping_pages(META_MAPPING(fio->sbi),
 					fio->old_blkaddr, fio->old_blkaddr);
 		f2fs_invalidate_compress_page(fio->sbi, fio->old_blkaddr);

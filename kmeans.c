@@ -16,7 +16,6 @@
 #define MIN_3(a, b, c) ((a) < (b)) ? (((a) < (c)) ? CURSEG_HOT_DATA : CURSEG_COLD_DATA) : (((c) > (b)) ? CURSEG_WARM_DATA : CURSEG_COLD_DATA)
 #define MIN_2(a, b) ((a) < (b)) ? CURSEG_HOT_DATA : CURSEG_WARM_DATA
 #define MAX_LOOP_NUM 1000
-#define MAX_hotness_entry 100000
 #define RANDOM_SEED 0  // 0为kmeans++播种，1为随机播种
 
 static void add_to_nearest_set(unsigned int data, long long *mass_center, int center_num);
@@ -28,35 +27,39 @@ struct timespec64 ts_start, ts_end;
 struct timespec64 ts_delta;
 int f2fs_hc(struct f2fs_sb_info *sbi)
 {
-    int center_num;
-    long long *mass_center;
-    int i, flag, loop_count, j;
     int ret = 0;
+    int center_num;
+    int i, flag, loop_count, j;
+    unsigned int num;
+    long long *mass_center;
 
+    sbi->hi->hc_count++;
     ktime_get_boottime_ts64(&ts_start);
+    num = sbi->hi->hotness_num;
+    if(sbi->hi->flag == 1)
+        num = MAX_HOTNESS_ENTRY;
+    printk("Doing f2fs_hc, count = %u.\n", num);
 
-    printk("Doing f2fs_hc, count = %u.\n", sbi->hi->hotness_num);
-    if (sbi->hi->hotness_num == 0 || sbi->hi->hotness_num > 100000000) {
-        printk("In function %s, sbi->hi->count is out of valid range(1~100000000).\n", __func__);
-        return -1;
-    }
     center_num = 2;
     sbi->centers[2] = __UINT32_MAX__ ;
     mass_center = kmalloc(sizeof(long long) * center_num * 3, GFP_KERNEL); //存放质心，平均值，集合元素数
+    /* Debug */
     if (!mass_center) {
         printk("In %s: mass_center == NULL.\n", __func__);
         return -1;
     }
-    printk("In function %s, hotness_num_num = %d.\n", __func__, sbi->hi->hotness_num);
-    if (sbi->hi->hotness_num == 0) {
+    printk("In function %s, hotness_num_num = %d.\n", __func__, num);
+    if (num == 0) {
         printk("In %s: hotness_num_num == 0.\n", __func__);
         ret = -1;
         goto out;
     }
-    if (find_initial_cluster(sbi->hi->Native_set,sbi->hi->hotness_num, mass_center, center_num, RANDOM_SEED)) {
+    /* 找初始质心 */
+    if (find_initial_cluster(sbi->hi->Native_set,num, mass_center, center_num, RANDOM_SEED)) {
         printk("In %s: find_initial_cluster error.\n", __func__);
         return -1;
     }
+    /* 计算质心 */
     flag = 1;
     loop_count = 0;
     while (flag == 1 && loop_count < MAX_LOOP_NUM)
@@ -69,7 +72,7 @@ int f2fs_hc(struct f2fs_sb_info *sbi)
             mass_center[i * 3 + 1] = 0;
             mass_center[i * 3 + 2] = 0;
         }
-        for (j = 0; j < sbi->hi->hotness_num; ++j)
+        for (j = 0; j < num; ++j)
             add_to_nearest_set(sbi->hi->Native_set[j], mass_center, center_num);
         for (i = 0; i < center_num; ++i)
         {
@@ -82,10 +85,11 @@ int f2fs_hc(struct f2fs_sb_info *sbi)
             }
         }
     }
+    /* 质心赋值 */
     for (i = 0; i < center_num; ++i)
         sbi->centers[i] = (unsigned int)mass_center[i * 3];
     bubble_sort(sbi->centers, center_num);
-
+    /* 质心打印 */
     if (center_num == 3) 
         printk("centers: %u, %u, %u\n", sbi->centers[0], sbi->centers[1], sbi->centers[2]);
     else if (center_num == 2)
@@ -95,11 +99,10 @@ int f2fs_hc(struct f2fs_sb_info *sbi)
 
 out:
     kfree(mass_center);
-    sbi->hi->hotness_num = 0;
     ktime_get_boottime_ts64(&ts_end);
     ts_delta = timespec64_sub(ts_end, ts_start);
     printk("[f2fs] time consumed: %lld (ns)\n",timespec64_to_ns(&ts_delta));
-
+    printk("[f2fs] hc_counts: %u \n",sbi->hi->hc_count);
     return ret;
 }
 

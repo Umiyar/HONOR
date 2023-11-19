@@ -12,7 +12,7 @@
 #define DEF_HC_HOTNESS_ENTRY_SHRINK_THRESHOLD 1000000
 #define DEF_HC_HOTNESS_ENTRY_SHRINK_NUM 100000
 #define DEF_HC_THREAD_DELTA_BLOCKS		100000
-#define MAX_HOTNESS_ENTRY 1000000
+#define MAX_HOTNESS_ENTRY 100000
 
 #define MIN(a, b) ((a) < (b)) ? a : b
 #define MAX(a, b) ((a) < (b)) ? b : a
@@ -28,7 +28,7 @@ struct f2fs_hc_kthread {
 
 int hotness_decide(struct f2fs_io_info *fio,__u32 Native_info);
 void hotness_maintain(struct f2fs_io_info *fio, int type_old, int type_new, __u64 value);
-// void save_hotness_entry(struct f2fs_sb_info *sbi);
+void save_hotness_entry(struct f2fs_sb_info *sbi);
 void release_hotness_entry(struct f2fs_sb_info *sbi);
 // unsigned int get_segment_hotness_avg(struct f2fs_sb_info *sbi, unsigned int segno);
 // bool hc_can_inplace_update(struct f2fs_io_info *fio);

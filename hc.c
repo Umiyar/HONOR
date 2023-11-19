@@ -10,6 +10,7 @@
 #include <linux/sched/signal.h>
 #include <linux/random.h>
 
+
 #include "f2fs.h"
 #include "node.h"
 #include "segment.h"
@@ -33,11 +34,13 @@ int hotness_decide(struct f2fs_io_info *fio,__u32 Native_info){
         fio->sbi->hi->counts[fio->temp]++;
 		fio->sbi->hi->new_blk_cnt++;
     }else{//更新写
-		printk("Native_info:%u",Native_info);
+		// printk("Native_info:%u",Native_info);
 		fio->sbi->hi->upd_blk_cnt++;
         fio->sbi->hi->Native_set[fio->sbi->hi->hotness_num++] = Native_info;
-		if(fio->sbi->hi->hotness_num > MAX_HOTNESS_ENTRY){
+		// printk("hotness_num:%u",fio->sbi->hi->hotness_num);
+		if(fio->sbi->hi->hotness_num >= MAX_HOTNESS_ENTRY){
 			fio->sbi->hi->hotness_num = 0;
+			fio->sbi->hi->flag = 1;
 			printk("The ceiling has been reached.");
 		}
         if (fio->sbi->centers_valid) {//如果聚类完成
@@ -59,11 +62,19 @@ int hotness_decide(struct f2fs_io_info *fio,__u32 Native_info){
 }
 
 static void init_hc_management(struct f2fs_sb_info *sbi){
+	int ret;
+	struct file *fp;
+	loff_t pos = 0;
+	char buf[256];
+	unsigned int n_clusters;
+	unsigned int centers[3];
 	unsigned int i;
 	sbi->hi = f2fs_kmalloc(sbi, sizeof(struct hotness_info), GFP_KERNEL);
 	sbi->hi->hotness_num = 0;
 	sbi->hi->new_blk_cnt = 0;
 	sbi->hi->upd_blk_cnt = 0;
+	sbi->hi->flag = 0;
+	sbi->hi->hc_count = 0;
 	//--------------------------------------------------------------------
 	sbi->hi->Native_set = vmalloc(sizeof(unsigned int) * MAX_HOTNESS_ENTRY);
 	if (!sbi->hi->Native_set) {
@@ -76,6 +87,30 @@ static void init_hc_management(struct f2fs_sb_info *sbi){
 		sbi->hi->Native_info_max[i] = 0;
 		sbi->hi->counts[i] = 0;
 	}
+	fp = filp_open("/tmp/f2fs_hotness_no", O_RDWR, 0664);
+	if(IS_ERR(fp)){
+		printk("No initial mass_center.\n");
+		goto no_initial;
+	}
+	if(ret < 0){
+		printk("kernel_read appear error.");
+		goto no_initial;
+	}
+	sbi->n_clusters = N_CLUSTERS;
+	// read centers
+	for(i = 0; i < n_clusters; ++i) {
+		memset(buf, 0, strlen(buf));
+		kernel_read(fp, buf, strlen(buf), &pos);
+		printk("read success!");
+		sscanf(buf,"%u",&centers[i]);
+		printk("buf:%s,n_clusters:%u",buf,centers[i]);
+	}
+	sbi->centers = kmalloc(sizeof(unsigned int) * sbi->n_clusters, GFP_KERNEL);
+	sbi->centers = centers;
+	sbi->centers_valid = 1;
+	filp_close(fp, NULL);
+	return;
+no_initial:
 	sbi->n_clusters = N_CLUSTERS;
 	sbi->centers = kmalloc(sizeof(unsigned int) * sbi->n_clusters, GFP_KERNEL);
 	sbi->centers_valid = 0;
@@ -139,6 +174,33 @@ int f2fs_start_hc_thread(struct f2fs_sb_info *sbi){
 out:
 	return err;
 }
+void save_hotness_entry(struct f2fs_sb_info *sbi)
+{
+	int ret;
+	char buf[256];
+	struct file *fp;
+	loff_t pos = 0;
+	unsigned int i;
+	if(sbi->centers_valid == 1){
+		fp = filp_open("/tmp/f2fs_hotness", O_RDWR | O_CREAT, 0664);
+		if (IS_ERR(fp)) goto out;
+		memset(buf, 0, strlen(buf));
+		printk("write clusters success.");
+		if(ret < 0) {
+			printk("kernel_write appears error.");
+			goto out;
+		}
+		// save centers
+		for(i = 0; i < sbi->n_clusters; i++) {
+			sprintf(buf,"%u\n",sbi->centers[i]);
+			kernel_write(fp, buf, strlen(buf), &pos);
+			memset(buf, 0, strlen(buf));
+		}
+		filp_close(fp, NULL);
+	}
+out:
+	return;
+}
 void f2fs_stop_hc_thread(struct f2fs_sb_info *sbi) {
     struct f2fs_hc_kthread *hc_th = sbi->hc_thread;
 	
@@ -152,5 +214,4 @@ void release_hotness_entry(struct f2fs_sb_info *sbi){
 	if (sbi->centers) kfree(sbi->centers);
 	if (sbi->hi->hotness_num == 0) return;
     vfree(sbi->hi->Native_set);
-	kfree(sbi->hi);
 }
