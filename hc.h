@@ -30,8 +30,8 @@ int hotness_decide(struct f2fs_io_info *fio,__u32 Native_info);
 void hotness_maintain(struct f2fs_io_info *fio, int type_old, int type_new, __u64 value);
 void save_hotness_entry(struct f2fs_sb_info *sbi);
 void release_hotness_entry(struct f2fs_sb_info *sbi);
-// unsigned int get_segment_hotness_avg(struct f2fs_sb_info *sbi, unsigned int segno);
-// bool hc_can_inplace_update(struct f2fs_io_info *fio);
+bool hc_can_inplace_update(struct f2fs_io_info *fio);
+unsigned long find_log_first_zero_bit(const unsigned long *addr, unsigned long size,unsigned int start);
 
 static inline void hc_decrease_sleep_time(struct f2fs_hc_kthread *hc_th, unsigned int *wait)
 {

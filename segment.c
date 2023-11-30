@@ -2420,10 +2420,12 @@ static int is_next_segment_free(struct f2fs_sb_info *sbi,
  * This function should be returned with success, otherwise BUG
  */
 static void get_new_segment(struct f2fs_sb_info *sbi,
-			unsigned int *newseg, bool new_sec, int dir)
+			unsigned int *newseg, bool new_sec, int dir ,int type)
 {
+	// unsigned long mask;
+	// unsigned int offset;
 	struct free_segmap_info *free_i = FREE_I(sbi);
-	unsigned int segno, secno, zoneno;
+	unsigned int segno, secno, zoneno, segno_test;
 	unsigned int total_zones = MAIN_SECS(sbi) / sbi->secs_per_zone;
 	unsigned int hint = GET_SEC_FROM_SEG(sbi, *newseg);
 	unsigned int old_zoneno = GET_ZONE_FROM_SEG(sbi, *newseg);
@@ -2431,27 +2433,73 @@ static void get_new_segment(struct f2fs_sb_info *sbi,
 	bool init = true;
 	int go_left = 0;
 	int i;
+	// segno_test =  find_log_first_zero_bit(free_i->free_secmap,
+	// 								MAIN_SECS(sbi),sbi->hi->log_start_blk[2]);
+	// printk("cold_segno_test:%u",segno_test);
+	// mask = segno_test/BITS_PER_LONG;
+	// offset = segno_test%BITS_PER_LONG;
+	// printk("free_secmap_segno_test:%lu mask:%lu offset:%u",free_i->free_secmap[mask],mask,offset);
+	// printk("cold_free_i_segno_test:%lu",(free_i->free_secmap[mask]>>offset)&0x00000001);
 
+	segno_test = find_log_first_zero_bit(free_i->free_secmap,
+									MAIN_SECS(sbi),sbi->hi->log_start_blk[0]);
+	printk("my_hot_segno_test:%u",segno_test);
+
+	segno_test = find_first_zero_bit(free_i->free_secmap,
+										MAIN_SECS(sbi));
+	printk("hot_segno_test:%u",segno_test);		
+	// mask = segno_test/BITS_PER_LONG;
+	// offset = segno_test%BITS_PER_LONG;
+	// printk("free_secmap_segno_test:%lu mask:%lu offset:%u",free_i->free_secmap[mask],mask,offset);
+	// printk("hot_free_i_segno_test:%lu",(free_i->free_secmap[mask]>>offset)&0x00000001);						
+	
+	// segno_test =  find_log_first_zero_bit(free_i->free_secmap,
+	// 								MAIN_SECS(sbi),sbi->hi->log_start_blk[1]);
+	// printk("warm_segno_test:%u",segno_test);
+	// mask = segno_test/BITS_PER_LONG;
+	// offset = segno_test%BITS_PER_LONG;
+	// printk("free_secmap_segno_test:%lu mask:%lu offset:%u",free_i->free_secmap[mask],mask,offset);
+	// printk("warm_free_i_segno_test:%lu",(free_i->free_secmap[mask]>>offset)&0x00000001);
+	// printk("segno_test------------------------------------------------------------------");
+	// segno_test =  find_last_bit(free_i->free_secmap,
+	// 								sbi->hi->log_end_blk[type]);
+	// printk("segno_test:%u",segno_test);
+	// if(type == CURSEG_HOT_DATA || type == CURSEG_WARM_DATA || type == CURSEG_COLD_DATA)
+	// 	printk("sbi->hi->log_end_blk[%d]:%u",type,sbi->hi->log_end_blk[type]);
 	spin_lock(&free_i->segmap_lock);
 
-	if (!new_sec && ((*newseg + 1) % sbi->segs_per_sec)) {
+	if (!new_sec && ((*newseg + 1) % sbi->segs_per_sec)) {//secno!=segno
 		segno = find_next_zero_bit(free_i->free_segmap,
 			GET_SEG_FROM_SEC(sbi, hint + 1), *newseg + 1);
 		if (segno < GET_SEG_FROM_SEC(sbi, hint + 1))
 			goto got_it;
 	}
 find_other_zone:
-	// printk("secno_old:%u",secno);
 	secno = find_next_zero_bit(free_i->free_secmap, MAIN_SECS(sbi), hint);
-	printk("secno_new:%u,total_secs:%u",secno,MAIN_SECS(sbi));
-	if (secno >= MAIN_SECS(sbi)) {
-		if (dir == ALLOC_RIGHT) {
-			secno = find_first_zero_bit(free_i->free_secmap,
-							MAIN_SECS(sbi));
-			f2fs_bug_on(sbi, secno >= MAIN_SECS(sbi));
-		} else {
-			go_left = 1;
-			left_start = hint - 1;
+	// printk("secno_new:%u,total_secs:%u,type:%d",secno,MAIN_SECS(sbi),type);
+	if(type == CURSEG_HOT_DATA || type == CURSEG_WARM_DATA || type == CURSEG_COLD_DATA){
+		if(sbi->hi->log_end_blk[type] != 0 ){
+			if (secno >= sbi->hi->log_end_blk[type]) {//分配的secno超出主区
+				if (dir == ALLOC_RIGHT) {//继续向右分配
+					secno = find_log_first_zero_bit(free_i->free_secmap,
+									sbi->hi->log_end_blk[type],sbi->hi->log_start_blk[type]);
+					f2fs_bug_on(sbi, secno >= MAIN_SECS(sbi));
+				} else {//向左分配
+					go_left = 1;
+					left_start = hint - 1;
+				}
+			}
+		}
+	}else{
+		if (secno >= MAIN_SECS(sbi)) {//分配的secno超出主区
+			if (dir == ALLOC_RIGHT) {//继续向右分配
+				secno = find_first_zero_bit(free_i->free_secmap,
+								MAIN_SECS(sbi));
+				f2fs_bug_on(sbi, secno >= MAIN_SECS(sbi));
+			} else {//向左分配
+				go_left = 1;
+				left_start = hint - 1;
+			}
 		}
 	}
 	if (go_left == 0)
@@ -2586,10 +2634,27 @@ static void new_curseg(struct f2fs_sb_info *sbi, int type, bool new_sec)
 
 	if (test_opt(sbi, NOHEAP))
 		dir = ALLOC_RIGHT;
-
+	for(int i = 0;i < 3;i++){
+		if(sbi->hi->log_start_blk[i] == 0 && ((struct curseg_info *)SM_I(sbi)->curseg_array + i)!=NULL){
+			sbi->hi->log_start_blk[i] = ((struct curseg_info *)SM_I(sbi)->curseg_array + i )->segno;
+		}
+	}
+	for(int i = 0;i<3;i++)
+		printk("sbi->hi->log_start_blk:%u",sbi->hi->log_start_blk[i]);
+	if(sbi->hi->log_end_blk[0] == 0 && ((struct curseg_info *)SM_I(sbi)->curseg_array + 2)!=NULL){
+		sbi->hi->log_end_blk[0] = ((struct curseg_info *)SM_I(sbi)->curseg_array + 2 )->segno;
+	}
+	if(sbi->hi->log_end_blk[1] == 0 && ((struct curseg_info *)SM_I(sbi)->curseg_array + 1)!=NULL){
+		sbi->hi->log_end_blk[1] = MAIN_SECS(sbi);
+	}
+	if(sbi->hi->log_end_blk[2] == 0 && ((struct curseg_info *)SM_I(sbi)->curseg_array + 2)!=NULL){
+		sbi->hi->log_end_blk[2] = ((struct curseg_info *)SM_I(sbi)->curseg_array + 1 )->segno;
+	}
+	for(int i = 0;i<3;i++)
+		printk("sbi->hi->log_end_blk:%u",sbi->hi->log_end_blk[i]);
 	segno = __get_next_segno(sbi, type);
 	printk("secno_old:%u alloc_mode:%d",segno,F2FS_OPTION(sbi).alloc_mode);
-	get_new_segment(sbi, &segno, new_sec, dir);
+	get_new_segment(sbi, &segno, new_sec, dir ,type);
 	curseg->next_segno = segno;
 	reset_curseg(sbi, type, 1);
 	curseg->alloc_type = LFS;
@@ -3348,14 +3413,19 @@ static void do_write_page(struct f2fs_summary *sum, struct f2fs_io_info *fio)
 	bool keep_order;
 	unsigned int segno_old,segno_new;
 	struct curseg_info *curseg;
-	if (GET_SEGNO(fio->sbi, fio->old_blkaddr) != NULL_SEGNO){
+	if (fio->type == DATA && (!page_private_gcing(fio->page)) && GET_SEGNO(fio->sbi, fio->old_blkaddr) != NULL_SEGNO){
 		segno_old = GET_SEGNO(fio->sbi,fio->old_blkaddr);
 		type = get_seg_entry(fio->sbi, segno_old)->type;
 		curseg = CURSEG_I(fio->sbi, type);
 		new_blkaddr = NEXT_FREE_BLKADDR(fio->sbi, curseg);
 		segno_new = GET_SEGNO(fio->sbi,fio->new_blkaddr);
-		Native_info = new_blkaddr - fio->old_blkaddr;
-		printk("segno_old:%u segno_new:%u type:%d new_blkaddr:%u old_blkaddr:%u Native_info:%u discard:%u",segno_old,segno_new,type,new_blkaddr,fio->old_blkaddr,Native_info,fio->sbi->discard_blks);
+		if(new_blkaddr >= fio->old_blkaddr){
+			Native_info = new_blkaddr - fio->old_blkaddr;
+		}
+		else{
+			Native_info = 512*(fio->sbi->hi->log_end_blk[type]-fio->sbi->hi->log_start_blk[type]) - (fio->old_blkaddr - new_blkaddr);
+		}
+		printk("segno_old:%u segno_new:%u type:%d new_blkaddr:%u old_blkaddr:%u Native_info:%u discard:%u log_length:%u",segno_old,segno_new,type,new_blkaddr,fio->old_blkaddr,Native_info,fio->sbi->discard_blks,512*(fio->sbi->hi->log_end_blk[type]-fio->sbi->hi->log_start_blk[type]));
 	}
 	if (fio->type == DATA && (!page_private_gcing(fio->page))) {
 		type = hotness_decide(fio,Native_info);
@@ -3373,6 +3443,7 @@ reallocate:
 		invalidate_mapping_pages(META_MAPPING(fio->sbi),
 					fio->old_blkaddr, fio->old_blkaddr);
 		f2fs_invalidate_compress_page(fio->sbi, fio->old_blkaddr);
+		stat_inc_outplace_blocks(fio->sbi);
 	}
 
 	/* writeout dirty page into bdev */
@@ -3443,11 +3514,21 @@ int f2fs_inplace_write_data(struct f2fs_io_info *fio)
 {
 	int err;
 	struct f2fs_sb_info *sbi = fio->sbi;
-	unsigned int segno;
-
+	unsigned int segno,segno_old;
+	int type;
+	__u32 new_blkaddr;
+	struct curseg_info *curseg;
 	fio->new_blkaddr = fio->old_blkaddr;
+	segno_old = GET_SEGNO(fio->sbi,fio->old_blkaddr);
+	type = get_seg_entry(fio->sbi, segno_old)->type;
+	curseg = CURSEG_I(fio->sbi, type);
+	new_blkaddr = NEXT_FREE_BLKADDR(fio->sbi, curseg);
 	/* i/o temperature is needed for passing down write hints */
-	__get_segment_type(fio);
+	if (fio->type == DATA && (!page_private_gcing(fio->page))) {
+		type = hotness_decide(fio, new_blkaddr-fio->old_blkaddr);
+	} else {
+		__get_segment_type(fio);
+	}
 
 	segno = GET_SEGNO(sbi, fio->new_blkaddr);
 

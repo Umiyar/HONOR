@@ -17,6 +17,7 @@
 #include "f2fs.h"
 #include "segment.h"
 #include "gc.h"
+#include "hc.h"
 #include "iostat.h"
 #include <trace/events/f2fs.h>
 
@@ -39,6 +40,7 @@ enum {
 	RESERVED_BLOCKS,	/* struct f2fs_sb_info */
 	CPRC_INFO,	/* struct ckpt_req_control */
 	ATGC_INFO,	/* struct atgc_management */
+	HC_THREAD,	/* struct f2fs_hc_thread */
 };
 
 static const char *gc_mode_names[MAX_GC_MODE] = {
@@ -89,6 +91,8 @@ static unsigned char *__struct_ptr(struct f2fs_sb_info *sbi, int struct_type)
 		return (unsigned char *)&sbi->cprc_info;
 	else if (struct_type == ATGC_INFO)
 		return (unsigned char *)&sbi->am;
+	else if (struct_type == HC_THREAD)
+		return (unsigned char *)sbi->hc_thread;	
 	return NULL;
 }
 
@@ -822,6 +826,8 @@ F2FS_RW_ATTR(F2FS_SBI, f2fs_sb_info, data_io_flag, data_io_flag);
 F2FS_RW_ATTR(F2FS_SBI, f2fs_sb_info, node_io_flag, node_io_flag);
 F2FS_RW_ATTR(F2FS_SBI, f2fs_sb_info, gc_urgent_high_remaining, gc_urgent_high_remaining);
 F2FS_RW_ATTR(CPRC_INFO, ckpt_req_control, ckpt_thread_ioprio, ckpt_thread_ioprio);
+F2FS_RW_ATTR(HC_THREAD, f2fs_hc_kthread, hc_min_sleep_time, min_sleep_time);
+F2FS_RW_ATTR(HC_THREAD, f2fs_hc_kthread, hc_max_sleep_time, max_sleep_time);
 F2FS_GENERAL_RO_ATTR(dirty_segments);
 F2FS_GENERAL_RO_ATTR(free_segments);
 F2FS_GENERAL_RO_ATTR(ovp_segments);
@@ -984,6 +990,9 @@ static struct attribute *f2fs_attrs[] = {
 	ATTR_LIST(seq_file_ra_mul),
 	ATTR_LIST(gc_segment_mode),
 	ATTR_LIST(gc_reclaimed_segments),
+	/* For hc */
+	ATTR_LIST(hc_min_sleep_time),
+	ATTR_LIST(hc_max_sleep_time),
 	ATTR_LIST(max_fragment_chunk),
 	ATTR_LIST(max_fragment_hole),
 	ATTR_LIST(current_atomic_write),

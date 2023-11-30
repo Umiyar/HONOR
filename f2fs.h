@@ -1607,12 +1607,15 @@ struct hotness_info {
 	unsigned int hotness_num;
 	unsigned int new_blk_cnt;
 	unsigned int upd_blk_cnt;
-	// unsigned int rmv_blk_cnt;
-	// unsigned int ipu_blk_cnt;
-	// unsigned int opu_blk_cnt;
+	unsigned int ipu_blk_cnt;
+	unsigned int opu_blk_cnt;
 	// 记录3种温度类别的一些信息
 	int flag;
+	unsigned long warm_free_secmap;
+	unsigned long cold_free_secmap;
 	unsigned int hc_count;
+	unsigned int log_start_blk[3];
+	unsigned int log_end_blk[3];
 	unsigned int counts[TEMP_TYPE_NUM];
 	unsigned int Native_info_min[TEMP_TYPE_NUM];
 	unsigned int Native_info_max[TEMP_TYPE_NUM];
@@ -1770,6 +1773,7 @@ struct f2fs_sb_info {
 	unsigned int segment_count[2];		/* # of allocated segments */
 	unsigned int block_count[2];		/* # of allocated blocks */
 	atomic_t inplace_count;		/* # of inplace update */
+	atomic_t outplace_count;		/* # of outplace update */
 	atomic64_t total_hit_ext;		/* # of lookup extent cache */
 	atomic64_t read_hit_rbtree;		/* # of hit rbtree extent node */
 	atomic64_t read_hit_largest;		/* # of hit largest extent node */
@@ -3916,6 +3920,7 @@ struct f2fs_stat_info {
 	unsigned int segment_count[2];
 	unsigned int block_count[2];
 	unsigned int inplace_count;
+	unsigned int outplace_count;
 	unsigned long long base_mem, cache_mem, page_mem;
 };
 
@@ -3997,6 +4002,8 @@ static inline struct f2fs_stat_info *F2FS_STAT(struct f2fs_sb_info *sbi)
 		((sbi)->block_count[(curseg)->alloc_type]++)
 #define stat_inc_inplace_blocks(sbi)					\
 		(atomic_inc(&(sbi)->inplace_count))
+#define stat_inc_outplace_blocks(sbi)					\
+		(atomic_inc(&(sbi)->outplace_count))		
 #define stat_update_max_atomic_write(inode)				\
 	do {								\
 		int cur = F2FS_I_SB(inode)->atomic_files;	\
@@ -4069,6 +4076,7 @@ void f2fs_update_sit_info(struct f2fs_sb_info *sbi);
 #define stat_inc_seg_type(sbi, curseg)			do { } while (0)
 #define stat_inc_block_count(sbi, curseg)		do { } while (0)
 #define stat_inc_inplace_blocks(sbi)			do { } while (0)
+#define stat_inc_outplace_blocks(sbi)			do { } while (0)
 #define stat_inc_outplace_blocks(sbi)			do { } while (0)
 #define stat_inc_seg_count(sbi, type, gc_type)		do { } while (0)
 #define stat_inc_data_blk_count(sbi, blks, gc_type)	do { } while (0)

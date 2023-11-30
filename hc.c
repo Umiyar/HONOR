@@ -18,12 +18,12 @@
 #include "kmeans.h"
 static void init_hc_management(struct f2fs_sb_info *sbi);
 static int kmeans_thread_func(void *data);
-
 static DEFINE_MUTEX(mutex_reduce_he);
 
 int hotness_decide(struct f2fs_io_info *fio,__u32 Native_info){
 	// printk("Native_info:%u",Native_info);
 	// __u32 Native_info;
+	struct free_segmap_info *free_i = FREE_I(fio->sbi);
     int type;
     type = -1;
     if(GET_SEGNO(fio->sbi, fio->old_blkaddr) == NULL_SEGNO){//第一次写入
@@ -47,6 +47,13 @@ int hotness_decide(struct f2fs_io_info *fio,__u32 Native_info){
 			type = kmeans_get_type(fio, Native_info);
 		} else {
 			type = fio->temp;
+		}
+		if(fio->sbi->hi->log_end_blk[type]!=0 && find_log_first_zero_bit(free_i->free_secmap,MAIN_SECS(fio->sbi),fio->sbi->hi->log_start_blk[type]) >= fio->sbi->hi->log_end_blk[type]){
+			type = CURSEG_WARM_DATA;
+			fio->temp = WARM;
+			fio->sbi->hi->counts[fio->temp]++;
+			printk("No hot sapce;");
+			return type;
 		}
         if (IS_HOT(type))
 			fio->temp = HOT;
@@ -75,6 +82,8 @@ static void init_hc_management(struct f2fs_sb_info *sbi){
 	sbi->hi->upd_blk_cnt = 0;
 	sbi->hi->flag = 0;
 	sbi->hi->hc_count = 0;
+	sbi->hi->warm_free_secmap = 0;
+	sbi->hi->cold_free_secmap = 0;
 	//--------------------------------------------------------------------
 	sbi->hi->Native_set = vmalloc(sizeof(unsigned int) * MAX_HOTNESS_ENTRY);
 	if (!sbi->hi->Native_set) {
@@ -86,6 +95,8 @@ static void init_hc_management(struct f2fs_sb_info *sbi){
 		sbi->hi->Native_info_min[i] = __UINT32_MAX__ ;
 		sbi->hi->Native_info_max[i] = 0;
 		sbi->hi->counts[i] = 0;
+		sbi->hi->log_end_blk[i] = 0;
+		sbi->hi->log_start_blk[i] = 0;
 	}
 	fp = filp_open("/tmp/f2fs_hotness_no", O_RDWR, 0664);
 	if(IS_ERR(fp)){
@@ -214,4 +225,62 @@ void release_hotness_entry(struct f2fs_sb_info *sbi){
 	if (sbi->centers) kfree(sbi->centers);
 	if (sbi->hi->hotness_num == 0) return;
     vfree(sbi->hi->Native_set);
+}
+
+bool hc_can_inplace_update(struct f2fs_io_info *fio)
+{
+	unsigned int segno,segno_old;
+	int type_blk;
+	__u32 Native_info,new_blkaddr;
+	struct curseg_info *curseg;
+	segno_old = GET_SEGNO(fio->sbi,fio->old_blkaddr);
+	type_blk = get_seg_entry(fio->sbi, segno_old)->type;
+	curseg = CURSEG_I(fio->sbi, type_blk);
+	new_blkaddr = NEXT_FREE_BLKADDR(fio->sbi, curseg);
+	if (fio->type == DATA && fio->old_blkaddr != __UINT32_MAX__) {
+		Native_info = new_blkaddr - fio->old_blkaddr;
+	}
+	if (type_blk != -1 && fio->sbi->centers_valid) {
+		segno = GET_SEGNO(fio->sbi, new_blkaddr);
+		if (segno_old == segno)	return true;
+		else	return false;
+	} else {
+		return true;
+	}
+}
+
+
+unsigned long find_log_first_zero_bit(const unsigned long *addr, unsigned long size,unsigned int start)
+{
+	unsigned long idx;
+	unsigned long temp;
+	unsigned long mask;
+	unsigned int offset;
+	if (small_const_nbits(size)) {
+		unsigned long val = *addr | ~GENMASK(size - 1, 0);
+
+		return val == ~0UL ? size : ffz(val);
+	}
+	mask = start/BITS_PER_LONG;
+	offset = start%BITS_PER_LONG;
+	printk("mask:%lu offset:%u",mask,offset);
+	temp = addr[mask];
+	printk("mask_old_temp:%lu",temp);
+	for(int i = 0;i < offset;i++){
+		temp = temp | ((unsigned long)1<<i);
+		// printk("mask_temp:%lu",temp);
+	}
+	printk("mask_new_temp:%lu",temp);
+	printk("mask------------------------------------------------------");
+	for (idx = mask; idx * BITS_PER_LONG < size; idx++) {
+		if(idx == mask){
+			if (temp != ~0UL )
+				return min(idx * BITS_PER_LONG + ffz(temp), size);
+		}else{
+			if (addr[idx] != ~0UL ){
+				return min(idx * BITS_PER_LONG + ffz(addr[idx]), size);
+			}
+		}
+	}
+	return size;
 }
