@@ -2639,6 +2639,11 @@ static void new_curseg(struct f2fs_sb_info *sbi, int type, bool new_sec)
 			sbi->hi->log_start_blk[i] = ((struct curseg_info *)SM_I(sbi)->curseg_array + i )->segno;
 		}
 	}
+	for(int i = 0;i < 3;i++){
+		if(sbi->gc_lastvic[i] == 0 && ((struct curseg_info *)SM_I(sbi)->curseg_array + i)!=NULL){
+			sbi->gc_lastvic[i] = ((struct curseg_info *)SM_I(sbi)->curseg_array + i )->segno;
+		}
+	}
 	for(int i = 0;i<3;i++)
 		printk("sbi->hi->log_start_blk:%u",sbi->hi->log_start_blk[i]);
 	if(sbi->hi->log_end_blk[0] == 0 && ((struct curseg_info *)SM_I(sbi)->curseg_array + 2)!=NULL){
@@ -2650,6 +2655,7 @@ static void new_curseg(struct f2fs_sb_info *sbi, int type, bool new_sec)
 	if(sbi->hi->log_end_blk[2] == 0 && ((struct curseg_info *)SM_I(sbi)->curseg_array + 2)!=NULL){
 		sbi->hi->log_end_blk[2] = ((struct curseg_info *)SM_I(sbi)->curseg_array + 1 )->segno;
 	}
+	
 	for(int i = 0;i<3;i++)
 		printk("sbi->hi->log_end_blk:%u",sbi->hi->log_end_blk[i]);
 	segno = __get_next_segno(sbi, type);
@@ -3427,11 +3433,29 @@ static void do_write_page(struct f2fs_summary *sum, struct f2fs_io_info *fio)
 		}
 		printk("segno_old:%u segno_new:%u type:%d new_blkaddr:%u old_blkaddr:%u Native_info:%u discard:%u log_length:%u",segno_old,segno_new,type,new_blkaddr,fio->old_blkaddr,Native_info,fio->sbi->discard_blks,512*(fio->sbi->hi->log_end_blk[type]-fio->sbi->hi->log_start_blk[type]));
 	}
-	if (fio->type == DATA && (!page_private_gcing(fio->page))) {
+	if(fio->type == DATA && page_private_gcing(fio->page)){
+		segno_old = GET_SEGNO(fio->sbi,fio->old_blkaddr);
+		type = get_seg_entry(fio->sbi, segno_old)->type;
+		fio->sbi->hi->counts[type]--;
+		if(type == CURSEG_HOT_DATA){
+			type = CURSEG_WARM_DATA;
+		}
+		else if(type == CURSEG_WARM_DATA){
+			type = CURSEG_WARM_DATA;
+		}
+		else{
+			type = CURSEG_COLD_DATA;
+		}
+		fio->sbi->hi->counts[type]++;
+		printk("gc_go_type:%d",type);
+		goto next;
+	}
+	if (fio->type == DATA) {
 		type = hotness_decide(fio,Native_info);
 	} else {
 		type = __get_segment_type(fio);
 	}
+next:
 	keep_order = (f2fs_lfs_mode(fio->sbi) && type == CURSEG_COLD_DATA);
 
 	if (keep_order)

@@ -1271,6 +1271,7 @@ struct atgc_management {
 };
 
 struct f2fs_gc_control {
+	int type;
 	unsigned int victim_segno;	/* target victim segment number */
 	int init_gc_type;		/* FG_GC or BG_GC */
 	bool no_bg_gc;			/* check the space and stop bg_gc */
@@ -1617,6 +1618,7 @@ struct hotness_info {
 	unsigned int log_start_blk[3];
 	unsigned int log_end_blk[3];
 	unsigned int counts[TEMP_TYPE_NUM];
+	unsigned int invalid_counts[TEMP_TYPE_NUM];
 	unsigned int Native_info_min[TEMP_TYPE_NUM];
 	unsigned int Native_info_max[TEMP_TYPE_NUM];
 };
@@ -1745,6 +1747,7 @@ struct f2fs_sb_info {
 	struct atgc_management am;		/* atgc management */
 	unsigned int cur_victim_sec;		/* current victim section num */
 	unsigned int gc_mode;			/* current GC state */
+	unsigned int gc_lastvic[3];
 	unsigned int next_victim_seg[2];	/* next segment in victim section */
 	spinlock_t gc_urgent_high_lock;
 	bool gc_urgent_high_limited;		/* indicates having limited trial count */

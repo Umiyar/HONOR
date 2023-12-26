@@ -30,6 +30,7 @@ static unsigned int count_bits(const unsigned long *addr,
 
 static int gc_thread_func(void *data)
 {
+	int type;
 	struct f2fs_sb_info *sbi = data;
 	struct f2fs_gc_kthread *gc_th = sbi->gc_thread;
 	wait_queue_head_t *wq = &sbi->gc_thread->gc_wait_queue_head;
@@ -38,31 +39,35 @@ static int gc_thread_func(void *data)
 	struct f2fs_gc_control gc_control = {
 		.victim_segno = NULL_SEGNO,
 		.should_migrate_blocks = false,
-		.err_gc_skipped = false };
+		.err_gc_skipped = false,
+		.type = 3
+		};
 
 	wait_ms = gc_th->min_sleep_time;
-
+	type = 3;
 	set_freezable();
 	do {
 		bool sync_mode, foreground = false;
-
+		printk("hello:1");
 		wait_event_interruptible_timeout(*wq,
 				kthread_should_stop() || freezing(current) ||
 				waitqueue_active(fggc_wq) ||
 				gc_th->gc_wake,
-				msecs_to_jiffies(wait_ms));
-
+				msecs_to_jiffies(wait_ms));//打断GC
+		printk("hello:2");
 		if (test_opt(sbi, GC_MERGE) && waitqueue_active(fggc_wq))
-			foreground = true;
+			foreground = true;//开启前台GC
 
 		/* give it a try one time */
 		if (gc_th->gc_wake)
-			gc_th->gc_wake = 0;
+			gc_th->gc_wake = 0;//只进行一次
 
-		if (try_to_freeze()) {
-			stat_other_skip_bggc_count(sbi);
+		if (try_to_freeze()) {//挂起
+			stat_other_skip_bggc_count(sbi);//跳过bggc
+			printk("hello:3");
 			continue;
 		}
+
 		if (kthread_should_stop())
 			break;
 
@@ -115,27 +120,48 @@ static int gc_thread_func(void *data)
 			f2fs_down_write(&sbi->gc_lock);
 			goto do_gc;
 		}
-
+		printk("hello:10");
+		if(log_need_GC_now(sbi,&type)){
+			printk("hello:5");
+			wait_ms = gc_th->log_sleep_time;
+			gc_control.type = type;
+			f2fs_down_write(&sbi->gc_lock);
+			goto do_gc;
+		}
 		if (foreground) {
+			printk("hello:4");
 			f2fs_down_write(&sbi->gc_lock);
 			goto do_gc;
 		} else if (!f2fs_down_write_trylock(&sbi->gc_lock)) {
 			stat_other_skip_bggc_count(sbi);
 			goto next;
 		}
-
 		if (!is_idle(sbi, GC_TIME)) {
+			printk("hello:6");
 			increase_sleep_time(gc_th, &wait_ms);
 			f2fs_up_write(&sbi->gc_lock);
 			stat_io_skip_bggc_count(sbi);
 			goto next;
 		}
-
-		if (has_enough_invalid_blocks(sbi))
+		printk("hello:11");
+		// if (log_has_enough_invalid_blocks(sbi)){
+		// 	printk("hello:7");
+		// 	decrease_sleep_time(gc_th, &wait_ms);
+		// }
+		// else{
+		// 	increase_sleep_time(gc_th, &wait_ms);
+		// 	printk("hello:8");
+		// }
+		if (has_enough_invalid_blocks(sbi)){
 			decrease_sleep_time(gc_th, &wait_ms);
-		else
+			printk("hello:7");
+		}
+		else{
 			increase_sleep_time(gc_th, &wait_ms);
+			printk("hello:8");
+		}
 do_gc:
+		printk("do_gc_time:%u",wait_ms);
 		if (!foreground)
 			stat_inc_bggc_count(sbi->stat_info);
 
@@ -165,6 +191,7 @@ do_gc:
 		/* balancing f2fs's metadata periodically */
 		f2fs_balance_fs_bg(sbi, true);
 next:
+		printk("hello:9");
 		sb_end_write(sbi->sb);
 
 	} while (!kthread_should_stop());
@@ -182,7 +209,7 @@ int f2fs_start_gc_thread(struct f2fs_sb_info *sbi)
 		err = -ENOMEM;
 		goto out;
 	}
-
+	gc_th->log_sleep_time = DEF_GC_THREAD_LOG_SLEEP_TIME;
 	gc_th->urgent_sleep_time = DEF_GC_THREAD_URGENT_SLEEP_TIME;
 	gc_th->min_sleep_time = DEF_GC_THREAD_MIN_SLEEP_TIME;
 	gc_th->max_sleep_time = DEF_GC_THREAD_MAX_SLEEP_TIME;
@@ -746,12 +773,12 @@ retry:
 		SIT_I(sbi)->dirty_min_mtime = ULLONG_MAX;
 
 	if (*result != NULL_SEGNO) {
-		if (!get_valid_blocks(sbi, *result, false)) {
+		if (!get_valid_blocks(sbi, *result, false)) {//没有有效的blk;
 			ret = -ENODATA;
 			goto out;
 		}
 
-		if (sec_usage_check(sbi, GET_SEC_FROM_SEG(sbi, *result)))
+		if (sec_usage_check(sbi, GET_SEC_FROM_SEG(sbi, *result)))//device or resource busy;
 			ret = -EBUSY;
 		else
 			p.min_segno = *result;
@@ -759,7 +786,7 @@ retry:
 	}
 
 	ret = -ENODATA;
-	if (p.max_search == 0)
+	if (p.max_search == 0)//如果没有dirty seg;
 		goto out;
 
 	if (__is_large_section(sbi) && p.alloc_mode == LFS) {
@@ -779,8 +806,8 @@ retry:
 	}
 
 	last_victim = sm->last_victim[p.gc_mode];
-	if (p.alloc_mode == LFS && gc_type == FG_GC) {
-		p.min_segno = check_bg_victims(sbi);
+	if (p.alloc_mode == LFS && gc_type == FG_GC) {//LFS且为前台GC；
+		p.min_segno = check_bg_victims(sbi);//用上次BGGC的seg
 		if (p.min_segno != NULL_SEGNO)
 			goto got_it;
 	}
@@ -794,7 +821,7 @@ retry:
 				last_segment / p.ofs_unit,
 				p.offset / p.ofs_unit);
 		segno = unit_no * p.ofs_unit;
-		if (segno >= last_segment) {
+		if (segno >= last_segment) {//大于
 			if (sm->last_victim[p.gc_mode]) {
 				last_segment =
 					sm->last_victim[p.gc_mode];
@@ -861,7 +888,7 @@ retry:
 			p.min_cost = cost;
 		}
 next:
-		if (nsearched >= p.max_search) {
+		if (nsearched >= p.max_search) {//超出最大查询长度；
 			if (!sm->last_victim[p.gc_mode] && segno <= last_victim)
 				sm->last_victim[p.gc_mode] =
 					last_victim + p.ofs_unit;
@@ -908,6 +935,204 @@ out:
 
 	return ret;
 }
+
+static void select_policy_Noar(struct f2fs_sb_info *sbi, int gc_type,
+			int type, struct victim_sel_policy *p)
+{
+	struct dirty_seglist_info *dirty_i = DIRTY_I(sbi);
+
+	if (p->alloc_mode == SSR) {
+		p->gc_mode = GC_GREEDY;
+		p->dirty_bitmap = dirty_i->dirty_segmap[type];
+		p->max_search = dirty_i->nr_dirty[type];
+		p->ofs_unit = 1;
+	} else if (p->alloc_mode == AT_SSR) {
+		p->gc_mode = GC_GREEDY;
+		p->dirty_bitmap = dirty_i->dirty_segmap[type];
+		p->max_search = dirty_i->nr_dirty[type];
+		p->ofs_unit = 1;
+	} else {
+		p->gc_mode = select_gc_type(sbi, gc_type);
+		p->ofs_unit = sbi->segs_per_sec;
+		if (__is_large_section(sbi)) {
+			p->dirty_bitmap = dirty_i->dirty_secmap;
+			p->max_search = count_bits(p->dirty_bitmap,
+						0, MAIN_SECS(sbi));
+		} else {
+			p->dirty_bitmap = dirty_i->dirty_segmap[type];
+			p->max_search = dirty_i->nr_dirty[type];
+		}
+	}
+
+	/*
+	 * adjust candidates range, should select all dirty segments for
+	 * foreground GC and urgent GC cases.
+	 */
+	if (gc_type != FG_GC &&
+			(sbi->gc_mode != GC_URGENT_HIGH) &&
+			(p->gc_mode != GC_AT && p->alloc_mode != AT_SSR) &&
+			p->max_search > sbi->max_victim_search)
+		p->max_search = sbi->max_victim_search;
+
+	/* let's select beginning hot/small space first in no_heap mode*/
+	if (f2fs_need_rand_seg(sbi))
+		p->offset = prandom_u32() % (MAIN_SECS(sbi) * sbi->segs_per_sec);
+	else if (test_opt(sbi, NOHEAP) &&
+		IS_NODESEG(type))
+		p->offset = 0;
+	else{
+		if(p->gc_mode == GC_CB)
+			p->offset = sbi->gc_lastvic[type];
+		else
+			p->offset = SIT_I(sbi)->last_victim[p->gc_mode];
+	}
+}
+
+
+static int get_victim_by_Noar(struct f2fs_sb_info *sbi,
+			unsigned int *result, int gc_type, int type,
+			char alloc_mode, unsigned long long age)
+{
+	struct dirty_seglist_info *dirty_i = DIRTY_I(sbi);
+	struct victim_sel_policy p;
+	unsigned int secno;
+	unsigned long *dirty_bitmap;
+	unsigned int unit_no, segno;
+	int ret = 0;
+
+	mutex_lock(&dirty_i->seglist_lock);
+
+	p.alloc_mode = alloc_mode;
+	select_policy_Noar(sbi, gc_type, type, &p);
+	printk("world:1");
+	if (*result != NULL_SEGNO) {
+		if (!get_valid_blocks(sbi, *result, false)) {//没有有效的blk;
+			ret = -ENODATA;
+			printk("world:2");
+			goto out;
+		}
+		if (sec_usage_check(sbi, GET_SEC_FROM_SEG(sbi, *result))){//device or resource busy;
+			printk("world:10");
+			ret = -EBUSY;
+		}
+		else{
+			segno = *result;
+			printk("world:11");
+		}
+		goto out;
+	}
+
+	ret = -ENODATA;
+	if (p.max_search == 0){//如果没有dirty seg;
+		printk("world:3");
+		goto out;
+	}
+	if (__is_large_section(sbi) && p.alloc_mode == LFS) {
+		if (sbi->next_victim_seg[BG_GC] != NULL_SEGNO) {
+			segno = sbi->next_victim_seg[BG_GC];
+			*result = segno;
+			sbi->next_victim_seg[BG_GC] = NULL_SEGNO;
+			goto got_result;
+		}
+		if (gc_type == FG_GC &&
+				sbi->next_victim_seg[FG_GC] != NULL_SEGNO) {
+			segno = sbi->next_victim_seg[FG_GC];
+			*result = segno;
+			sbi->next_victim_seg[FG_GC] = NULL_SEGNO;
+			goto got_result;
+		}
+	}
+	if (p.alloc_mode == LFS && gc_type == FG_GC) {//LFS且为前台GC；
+		printk("world:12");
+		segno = check_bg_victims(sbi);//用上次BGGC的seg
+		if (segno != NULL_SEGNO)
+			goto got_it;
+	}
+	printk("world:9");
+	dirty_bitmap = p.dirty_bitmap;
+	unit_no = find_next_bit(dirty_bitmap,
+			sbi->hi->log_end_blk[type] / p.ofs_unit,
+			p.offset / p.ofs_unit);
+	segno = unit_no * p.ofs_unit;
+	p.offset = segno + p.ofs_unit;
+	if (segno >= sbi->hi->log_end_blk[type] * sbi->segs_per_sec) {//大于
+		p.offset = sbi->hi->log_start_blk[type];
+	}
+	sbi->hi->invalid_counts[type] = sbi->hi->invalid_counts[type] - (512-get_seg_entry(sbi, segno)->valid_blocks);
+	printk("CUR_valid:%u",get_seg_entry(sbi, segno)->valid_blocks);
+#ifdef CONFIG_F2FS_CHECK_FS
+		/*
+		 * skip selecting the invalid segno (that is failed due to block
+		 * validity check failure during GC) to avoid endless GC loop in
+		 * such cases.
+		 */
+		if (test_bit(segno, sm->invalid_segmap))
+			goto next;
+#endif
+
+		secno = GET_SEC_FROM_SEG(sbi, segno);
+
+		if (sec_usage_check(sbi, secno))
+			goto next;
+
+		/* Don't touch checkpointed data */
+		if (unlikely(is_sbi_flag_set(sbi, SBI_CP_DISABLED))) {
+			if (p.alloc_mode == LFS) {
+				/*
+				 * LFS is set to find source section during GC.
+				 * The victim should have no checkpointed data.
+				 */
+				if (get_ckpt_valid_blocks(sbi, segno, true))
+					goto next;
+			} else {
+				/*
+				 * SSR | AT_SSR are set to find target segment
+				 * for writes which can be full by checkpointed
+				 * and newly written blocks.
+				 */
+				if (!f2fs_segment_has_free_slot(sbi, segno))
+					goto next;
+			}
+		}
+
+		if (gc_type == BG_GC && test_bit(secno, dirty_i->victim_secmap)){
+			printk("world:4");
+			goto next;
+		}
+		if (gc_type == FG_GC && f2fs_section_is_pinned(dirty_i, secno)){
+			printk("world:5");
+			goto next;
+		}
+	
+next:
+		printk("world:6");
+		if (segno != NULL_SEGNO) {
+got_it:	
+		printk("world:7");
+		sbi->gc_lastvic[type] = p.offset;
+		*result = (segno / p.ofs_unit) * p.ofs_unit;
+got_result:
+		printk("world:8");
+		if (p.alloc_mode == LFS) {
+			secno = GET_SEC_FROM_SEG(sbi, p.min_segno);
+			if (gc_type == FG_GC)
+				sbi->cur_victim_sec = secno;
+			else
+				set_bit(secno, dirty_i->victim_secmap);
+		}
+		ret = 0;
+
+	}
+out:
+	if (segno != NULL_SEGNO)
+		trace_f2fs_get_victim(sbi->sb, type, gc_type, &p,
+				sbi->cur_victim_sec,
+				prefree_segments(sbi), free_segments(sbi));
+	mutex_unlock(&dirty_i->seglist_lock);
+
+	return ret;
+}
+
 
 static const struct victim_selection default_v_ops = {
 	.get_victim = get_victim_by_default,
@@ -1498,12 +1723,12 @@ next_step:
 
 		if (phase == 0) {
 			f2fs_ra_meta_pages(sbi, NAT_BLOCK_OFFSET(nid), 1,
-							META_NAT, true);
+							META_NAT, true);//读对应的mata_page；
 			continue;
 		}
 
 		if (phase == 1) {
-			f2fs_ra_node_page(sbi, nid);
+			f2fs_ra_node_page(sbi, nid);//读对应的node page； 
 			continue;
 		}
 
@@ -1620,14 +1845,20 @@ next_step:
 }
 
 static int __get_victim(struct f2fs_sb_info *sbi, unsigned int *victim,
-			int gc_type)
+			int gc_type, int type)
 {
 	struct sit_info *sit_i = SIT_I(sbi);
 	int ret;
-
 	down_write(&sit_i->sentry_lock);
-	ret = DIRTY_I(sbi)->v_ops->get_victim(sbi, victim, gc_type,
-					      NO_CHECK_TYPE, LFS, 0);
+	if((gc_type == BG_GC || gc_type == FG_GC) && type != 3){
+		ret = get_victim_by_Noar(sbi, victim, gc_type,
+					     	 type, LFS, 0);
+	}
+	else{
+		printk("gc_type:%d",gc_type);
+		ret = DIRTY_I(sbi)->v_ops->get_victim(sbi, victim, gc_type,
+					      	NO_CHECK_TYPE, LFS, 0);
+	}
 	up_write(&sit_i->sentry_lock);
 	return ret;
 }
@@ -1807,7 +2038,10 @@ gc_more:
 		goto stop;
 	}
 retry:
-	ret = __get_victim(sbi, &segno, gc_type);
+	printk("GC_before:%u",segno);
+	ret = __get_victim(sbi, &segno, gc_type, gc_control->type);
+	printk("GC_valid:%u",get_seg_entry(sbi, segno)->valid_blocks);
+	printk("GC_type:%d GC_segno:%u",gc_control->type,segno);
 	if (ret) {
 		/* allow to search victim from sections has pinned data */
 		if (ret == -ENODATA && gc_type == FG_GC &&

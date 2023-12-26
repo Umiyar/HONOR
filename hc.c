@@ -10,7 +10,6 @@
 #include <linux/sched/signal.h>
 #include <linux/random.h>
 
-
 #include "f2fs.h"
 #include "node.h"
 #include "segment.h"
@@ -23,6 +22,8 @@ static DEFINE_MUTEX(mutex_reduce_he);
 int hotness_decide(struct f2fs_io_info *fio,__u32 Native_info){
 	// printk("Native_info:%u",Native_info);
 	// __u32 Native_info;
+	unsigned int segno_old;
+	int type_old;
 	struct free_segmap_info *free_i = FREE_I(fio->sbi);
     int type;
     type = -1;
@@ -31,13 +32,25 @@ int hotness_decide(struct f2fs_io_info *fio,__u32 Native_info){
         Native_info = __UINT32_MAX__;
         type = CURSEG_COLD_DATA;
         fio->temp = COLD;
-        fio->sbi->hi->counts[fio->temp]++;
+		if(valid_segment_sum_Noar(free_i->free_segmap,fio->sbi->hi->log_end_blk[COLD],fio->sbi->hi->log_start_blk[COLD]) < 100){
+			printk("no cold space");
+			if(valid_segment_sum_Noar(free_i->free_segmap,fio->sbi->hi->log_end_blk[WARM],fio->sbi->hi->log_start_blk[WARM] > 100)){
+				fio->temp = WARM;
+				type = CURSEG_WARM_DATA;
+			}
+			else{
+				fio->temp = HOT;
+				type = CURSEG_HOT_DATA;
+			}
+		}
+		fio->sbi->hi->counts[fio->temp]++;
 		fio->sbi->hi->new_blk_cnt++;
     }else{//更新写
-		// printk("Native_info:%u",Native_info);
+		segno_old = GET_SEGNO(fio->sbi,fio->old_blkaddr);
+		type_old = get_seg_entry(fio->sbi, segno_old)->type;
+		fio->sbi->hi->invalid_counts[type_old]++;
 		fio->sbi->hi->upd_blk_cnt++;
         fio->sbi->hi->Native_set[fio->sbi->hi->hotness_num++] = Native_info;
-		// printk("hotness_num:%u",fio->sbi->hi->hotness_num);
 		if(fio->sbi->hi->hotness_num >= MAX_HOTNESS_ENTRY){
 			fio->sbi->hi->hotness_num = 0;
 			fio->sbi->hi->flag = 1;
@@ -48,12 +61,31 @@ int hotness_decide(struct f2fs_io_info *fio,__u32 Native_info){
 		} else {
 			type = fio->temp;
 		}
-		if(fio->sbi->hi->log_end_blk[type]!=0 && find_log_first_zero_bit(free_i->free_secmap,MAIN_SECS(fio->sbi),fio->sbi->hi->log_start_blk[type]) >= fio->sbi->hi->log_end_blk[type]){
-			type = CURSEG_WARM_DATA;
-			fio->temp = WARM;
+		if(fio->sbi->hi->log_end_blk[type]!=0 && valid_segment_sum_Noar(free_i->free_segmap,fio->sbi->hi->log_end_blk[type],fio->sbi->hi->log_start_blk[type]) < 100){
+			if(valid_segment_sum_Noar(free_i->free_segmap,fio->sbi->hi->log_end_blk[WARM],fio->sbi->hi->log_start_blk[WARM]) >= 50)
+				type = CURSEG_WARM_DATA;
+			else if(valid_segment_sum_Noar(free_i->free_segmap,fio->sbi->hi->log_end_blk[COLD],fio->sbi->hi->log_start_blk[COLD]) >= 50)
+				type = CURSEG_COLD_DATA;
+			else 
+				type = CURSEG_HOT_DATA;
+			fio->temp = type;
 			fio->sbi->hi->counts[fio->temp]++;
 			printk("No hot sapce;");
 			return type;
+		}
+		if(valid_segment_sum_Noar(free_i->free_segmap,fio->sbi->hi->log_end_blk[type],fio->sbi->hi->log_start_blk[type]) < 50){
+			if(valid_segment_sum_Noar(free_i->free_segmap,fio->sbi->hi->log_end_blk[WARM],fio->sbi->hi->log_start_blk[WARM]) > 100){
+				fio->temp = WARM;
+				type = CURSEG_WARM_DATA;
+			}
+			else if(valid_segment_sum_Noar(free_i->free_segmap,fio->sbi->hi->log_end_blk[COLD],fio->sbi->hi->log_start_blk[COLD]) > 100){
+				fio->temp = COLD;
+				type = CURSEG_COLD_DATA;
+			}
+			else{
+				fio->temp = HOT;
+				type = CURSEG_HOT_DATA;
+			}
 		}
         if (IS_HOT(type))
 			fio->temp = HOT;
@@ -97,6 +129,8 @@ static void init_hc_management(struct f2fs_sb_info *sbi){
 		sbi->hi->counts[i] = 0;
 		sbi->hi->log_end_blk[i] = 0;
 		sbi->hi->log_start_blk[i] = 0;
+		sbi->gc_lastvic[i] = 0;
+		sbi->hi->invalid_counts[0] = 0;
 	}
 	fp = filp_open("/tmp/f2fs_hotness_no", O_RDWR, 0664);
 	if(IS_ERR(fp)){
@@ -284,3 +318,4 @@ unsigned long find_log_first_zero_bit(const unsigned long *addr, unsigned long s
 	}
 	return size;
 }
+

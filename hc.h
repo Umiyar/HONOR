@@ -32,7 +32,11 @@ void save_hotness_entry(struct f2fs_sb_info *sbi);
 void release_hotness_entry(struct f2fs_sb_info *sbi);
 bool hc_can_inplace_update(struct f2fs_io_info *fio);
 unsigned long find_log_first_zero_bit(const unsigned long *addr, unsigned long size,unsigned int start);
-
+// int get_victim_by_Noar(struct f2fs_sb_info *sbi,
+// 			unsigned int *result, int gc_type, int type,
+// 			char alloc_mode, unsigned long long age);
+// void select_policy_Nora(struct f2fs_sb_info *sbi, int gc_type,
+// 			int type, struct victim_sel_policy *p);
 static inline void hc_decrease_sleep_time(struct f2fs_hc_kthread *hc_th, unsigned int *wait)
 {
 	unsigned int min_time = hc_th->min_sleep_time;
@@ -50,6 +54,56 @@ static inline void hc_increase_sleep_time(struct f2fs_hc_kthread *hc_th, unsigne
 		*wait = max_time;
 	else
 		*wait = ((*wait)<<1);
+}
+
+static inline unsigned long valid_segment_sum_Noar(const unsigned long *addr, unsigned long size,unsigned int start){
+	unsigned long idx;
+	unsigned long temp;
+	unsigned long mask;
+	unsigned int offset;
+	unsigned long ret;
+	unsigned long basic;
+	int i;
+	if (small_const_nbits(size)) {
+		unsigned long val = *addr | ~GENMASK(size - 1, 0);
+
+		return val == ~0UL ? size : ffz(val);
+	}
+	mask = start/BITS_PER_LONG;
+	offset = start%BITS_PER_LONG;
+	temp = addr[mask];
+	for(int i = 0;i < offset;i++){
+		temp = temp | ((unsigned long)1<<i);
+	}
+	ret = 0;
+	for (idx = mask; idx * BITS_PER_LONG < size; idx++) {
+		i = 0;
+		basic = 1;
+		if(idx == mask){
+			if (temp != ~0UL ){
+				while(1){	
+					i++;
+					if(!(temp & basic))
+						ret++;
+					basic <<= 1;
+					if(i>=64)
+						break;
+				}
+			}
+		}else{
+			if (addr[idx] != ~0UL ){
+				while(1){	
+					i++;
+					if(!(addr[idx] & basic))
+						ret++;
+					basic <<= 1;
+					if(i>=64)
+						break;
+				}
+			}
+		}
+	}
+	return ret;
 }
 
 #endif
